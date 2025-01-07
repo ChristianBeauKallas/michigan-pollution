@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3-Mile Distance Checker (Updated Coordinates)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+  <style>
+    /* Global resets & layout */
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background-color: #f8f9fa;
+    }
+
+    /* Top panel for address input, button, legend, etc. */
+    #top-panel {
+      background: #ffffff;
+      padding: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    #top-panel label {
+      margin-right: auto;
+      font-weight: bold;
+      color: #333;
+    }
+    #top-panel input[type="text"] {
+      flex: 1 1 auto;
+      max-width: 300px;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      color: #333;
+    }
+    #top-panel button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background: #007bff;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #top-panel button:hover {
+      background: #0069d9;
+    }
+
+    /* Legend styling */
+    #legend {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-left: 20px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: #333;
+    }
+    .legend-color {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+    }
+    .legend-dte { background: #f03; }
+    .legend-ees { background: #0a6; }
+
+    /* Error & result messages */
+    #error, #result {
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 14px;
+      margin-left: 15px;
+      margin-right: 15px;
+    }
+    #error {
+      display: none;
+      background-color: #fdecea;
+      border-left: 4px solid #f44336;
+      color: #666;
+    }
+    #result {
+      background-color: #e7f3fe;
+      border-left: 4px solid #2196F3;
+      color: #333;
+    }
+
+    /* The map takes the remaining vertical space */
+    #map {
+      flex: 1;
+      margin-top: 8px;
+    }
+
+    /* Table for facility distances */
+    table {
+      border-collapse: collapse;
+      margin-top: 8px;
+      width: 100%;
+      max-width: 600px;
+      color: #333;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+    }
+    th {
+      background: #f2f2f2;
+    }
+    .highlight-row {
+      background-color: #fff3cd; /* mild highlight if within 3 miles */
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top controls -->
+  <div id="top-panel">
+    <label for="addressInput">Enter Address (3-mile check):</label>
+    <input
+      type="text"
+      id="addressInput"
+      placeholder="e.g., 123 Main St, Detroit, MI"
+    />
+    <button onclick="calculateDistance()">Calculate Distance</button>
+
+    <div id="legend">
+      <div class="legend-item">
+        <div class="legend-color legend-dte"></div>
+        <span>DTE Energy - River Rouge Power Plant</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color legend-ees"></div>
+        <span>EES Coke Battery</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="error"></div>
+  <div id="result"></div>
+
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <script>
+    /**
+     * Two facilities: 
+     * 1) DTE Energy - River Rouge Power Plant
+     *    lat: 42.27363887150636, lng: -83.11257270168169
+     *
+     * 2) EES Coke Battery
+     *    lat: 42.28113534177762, lng: -83.11175983623178
+     */
+    const facilities = [
+      {
+        name: "DTE Energy - River Rouge Power Plant",
+        lat: 42.27363887150636,
+        lng: -83.11257270168169,
+        circleColor: "#f03"
+      },
+      {
+        name: "EES Coke Battery",
+        lat: 42.28113534177762,
+        lng: -83.11175983623178,
+        circleColor: "#0a6"
+      }
+    ];
+
+    // 3 miles => ~4828 meters
+    const THREE_MILES_METERS = 3 * 1609.34;
+
+    let map;
+    let userMarker;
+
+    // Initialize Leaflet map
+    function initMap() {
+      // Center near Southeastern Michigan
+      map = L.map("map").setView([42.27, -83.11], 12);
+
+      // OpenStreetMap tile layer
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'
+      }).addTo(map);
+
+      // For each facility, place a marker & draw a 3-mile circle
+      facilities.forEach(fac => {
+        L.marker([fac.lat, fac.lng])
+          .addTo(map)
+          .bindPopup(`<strong>${fac.name}</strong>`);
+
+        L.circle([fac.lat, fac.lng], {
+          radius: THREE_MILES_METERS,
+          color: fac.circleColor,
+          fillColor: fac.circleColor,
+          fillOpacity: 0.15
+        }).addTo(map);
+      });
+    }
+
+    // Straight-line distance (Haversine) in miles
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 3958.8; // Earth radius in miles
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+    function toRad(deg) {
+      return deg * (Math.PI / 180);
+    }
+
+    // Geocode address using Nominatim
+    async function geocodeAddress(address) {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          address
+        )}`;
+        const resp = await fetch(url, {
+          headers: {
+            // Provide a user-agent per Nominatim usage policy
+            "User-Agent": "DistanceChecker/1.0 (your.email@example.com)"
+          }
+        });
+        if (!resp.ok) {
+          throw new Error(`HTTP error: ${resp.status}`);
+        }
+        const data = await resp.json();
+        if (!data || data.length === 0) {
+          showError("No results found for that address. Check spelling or try again.");
+          return null;
+        }
+        const lat = parseFloat(data[0].lat);
+        const lng = parseFloat(data[0].lon);
+        return { lat, lng };
+      } catch (err) {
+        showError("Geocoding failed: " + err.message);
+        return null;
+      }
+    }
+
+    // On "Calculate Distance" button click
+    async function calculateDistance() {
+      clearMessages();
+      const address = document.getElementById("addressInput").value.trim();
+      if (!address) {
+        showError("Please enter an address.");
+        return;
+      }
+
+      // 1) Geocode user address
+      const coords = await geocodeAddress(address);
+      if (!coords) return;
+
+      // 2) Place marker for user's location
+      placeUserMarker(coords.lat, coords.lng);
+
+      // 3) Build table of results
+      let tableHTML = `
+        <strong>Entered Address:</strong> ${address}
+        <table>
+          <thead>
+            <tr>
+              <th>Facility Name</th>
+              <th>Distance (miles)</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      facilities.forEach(fac => {
+        const distMiles = haversine(coords.lat, coords.lng, fac.lat, fac.lng);
+        const within3 = distMiles <= 3;
+        const highlight = within3 ? "highlight-row" : "";
+        tableHTML += `
+          <tr class="${highlight}">
+            <td>${fac.name}</td>
+            <td>${distMiles.toFixed(2)}${within3 ? " (within 3 miles)" : ""}</td>
+          </tr>
+        `;
+      });
+
+      tableHTML += `</tbody></table>`;
+      document.getElementById("result").innerHTML = tableHTML;
+    }
+
+    // Place user marker
+    function placeUserMarker(lat, lng) {
+      if (userMarker) {
+        map.removeLayer(userMarker);
+      }
+      userMarker = L.marker([lat, lng]).addTo(map);
+      userMarker.bindPopup("<strong>Your Location</strong>").openPopup();
+      // Zoom in a bit
+      map.setView([lat, lng], 13);
+    }
+
+    // Show an error message
+    function showError(msg) {
+      const errDiv = document.getElementById("error");
+      errDiv.textContent = msg;
+      errDiv.style.display = "block";
+    }
+
+    // Clear error & result
+    function clearMessages() {
+      const errDiv = document.getElementById("error");
+      errDiv.style.display = "none";
+      errDiv.textContent = "";
+      document.getElementById("result").innerHTML = "";
+    }
+
+    // Initialize the map on page load
+    window.onload = initMap;
+  </script>
+</body>
+</html>
